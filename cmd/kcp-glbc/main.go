@@ -178,19 +178,14 @@ func main() {
 			namespace = tls.DefaultCertificateNS
 		}
 
-		var tlsCertProvider tls.CertProvider
-		switch options.TLSProvider {
-		case "glbc-ca":
-			tlsCertProvider = tls.CertProviderCA
-		case "le-staging":
-			tlsCertProvider = tls.CertProviderLEStaging
-		case "le-production":
-			tlsCertProvider = tls.CertProviderLEProd
-		default:
-			exitOnError(fmt.Errorf("unsupported TLS certificate issuer: %s", options.TLSProvider), "Failed to create cert provider")
+		// TLSProvider is mandatory when TLS is enabled
+		if options.TLSProvider == "" {
+			exitOnError(fmt.Errorf("TLS Provider not specified"), "Failed to create cert provider")
 		}
 
-		log.Logger.Info("Creating TLS certificate provider", "issuer", tlsCertProvider)
+		var tlsCertProvider tls.CertProvider = tls.CertProvider(options.TLSProvider)
+
+		log.Logger.Info("Instantiating TLS certificate provider", "issuer", tlsCertProvider)
 
 		certProvider, err = tls.NewCertManager(tls.CertManagerConfig{
 			DNSValidator:  tls.DNSValidatorRoute53,

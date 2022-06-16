@@ -122,6 +122,23 @@ kubectl -n kcp-glbc create secret generic kcp-glbc-aws-credentials \
 --from-literal=AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
 ```
 
+### TLS Issuer provider (Optional) 
+
+A TLS Issuer provider supported by cert-manager and created via KCP before running the GLBC controller is required only if the genaration of TLS certs (GLBC_TLS_PROVIDED) for the GLBC is enabled. 
+
+A reference to the TLS certificate issuer resource can be passed when starting the GLBC using the tag `--glbc-tls-provider` or the environment variables `GLBC_TLS_PROVIDER`
+
+Refer to the [cert-manager repo](https://github.com/cert-manager/cert-manager#cert-manager) to learn more about the supported providers and how to create a cert issuer.
+
+There is also a script that generates a let's encrypt issuer against KCP that can be triggered using the command below:
+
+```
+go run ./utils/certman-issuer/ 
+--glbc-kubeconfig <Path to GLBC kubeconfig> 
+--glbc-tls-provider <The TLS certificate issuer, one of [glbc-ca, le-staging, le-production]> 
+--region <the region we should target with AWS clients>
+```
+
 ### GLBC Controller Options (Optional)
 
 A config map `configmap/kcp-glbc-controller-config` containing GLBC configuration options. A config map is created by 
@@ -140,8 +157,8 @@ kubectl -n kcp-glbc edit configmap kcp-glbc-controller-config
 | `GLBC_KCP_CONTEXT` | The kcp kube context | system:admin |
 | `GLBC_LOGICAL_CLUSTER_TARGET` | logical cluster to target | `*` |
 | `GLBC_TLS_PROVIDED` | Generate TLS certs for glbc managed hosts | false |
-| `GLBC_TLS_PROVIDER` | TLS Cert provider to use, one of [glbc-ca, le-staging, le-production] | glbc-ca |
-| `HCG_LE_EMAIL` | EMail address to use during LE cert requests | kuadrant-dev@redhat.com |
+| `GLBC_TLS_PROVIDER` | The TLS certificate issuer | glbc-ca |
+| `HCG_LE_EMAIL` | Email address to use during LE cert requests | kuadrant-dev@redhat.com |
 | `NAMESPACE` | Target namesapce of rcert-manager resources (issuers, certificates) | kcp-glbc |
 | `GLBC_WORKSPACE` | The GLBC workspace| root:default:kcp-glbc |
 | `GLBC_COMPUTE_WORKSPACE` | The user compute workspace | root:default:kcp-glbc-user-compute |
