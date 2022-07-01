@@ -19,7 +19,7 @@ import (
 
 	kuadrantv1 "github.com/kuadrant/kcp-glbc/pkg/client/kuadrant/clientset/versioned"
 	"github.com/kuadrant/kcp-glbc/pkg/net"
-	"github.com/kuadrant/kcp-glbc/pkg/reconciler"
+	basereconciler "github.com/kuadrant/kcp-glbc/pkg/reconciler"
 	"github.com/kuadrant/kcp-glbc/pkg/tls"
 )
 
@@ -36,7 +36,7 @@ func NewController(config *ControllerConfig) *Controller {
 	}
 	hostResolver = net.NewSafeHostResolver(hostResolver)
 
-	base := reconciler.NewController(controllerName, queue)
+	base := basereconciler.NewController(controllerName, queue)
 	c := &Controller{
 		Controller:            base,
 		kubeClient:            config.KubeClient,
@@ -93,7 +93,7 @@ type ControllerConfig struct {
 }
 
 type Controller struct {
-	*reconciler.Controller
+	*basereconciler.Controller
 	kubeClient            kubernetes.ClusterInterface
 	sharedInformerFactory informers.SharedInformerFactory
 	dnsRecordClient       kuadrantv1.ClusterInterface

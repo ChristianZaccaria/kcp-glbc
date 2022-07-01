@@ -7,9 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/rs/xid"
-
-	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,109 +19,74 @@ import (
 	v1 "github.com/kuadrant/kcp-glbc/pkg/apis/kuadrant/v1"
 	"github.com/kuadrant/kcp-glbc/pkg/cluster"
 	"github.com/kuadrant/kcp-glbc/pkg/dns/aws"
+	"github.com/kuadrant/kcp-glbc/pkg/net"
+	"github.com/kuadrant/kcp-glbc/pkg/tls"
 	"github.com/kuadrant/kcp-glbc/pkg/util/metadata"
 	"github.com/kuadrant/kcp-glbc/pkg/util/slice"
+	utilserrors "k8s.io/apimachinery/pkg/util/errors"
 )
+
+type reconcileStatus int
 
 const (
-	manager                 = "kcp-ingress"
-	cascadeCleanupFinalizer = "kcp.dev/cascade-cleanup"
+	manager                             = "kcp-ingress"
+	reconcileStatusStop reconcileStatus = iota
+	reconcileStatusContinue
 )
 
-func (c *Controller) reconcile(ctx context.Context, ingress *networkingv1.Ingress) error {
-	if ingress.DeletionTimestamp != nil && !ingress.DeletionTimestamp.IsZero() {
-		c.Logger.Info("Deleting Ingress", "ingress", ingress)
+type reconciler interface {
+	reconcile(ctx context.Context, ingress *networkingv1.Ingress) (reconcileStatus, error)
+}
 
-		// delete any DNS records
-		if err := c.ensureDNS(ctx, ingress); err != nil {
-			return err
-		}
-		// delete any certificates
-		if err := c.ensureCertificate(ctx, ingress); err != nil {
-			return err
-		}
+type certificateReconciler struct {
+	createCertificate func(ctx context.Context, mapper tls.CertificateRequest) error
+	deleteCertificate func(ctx context.Context, mapper tls.CertificateRequest) error
+	patchIngress      func(ctx context.Context, ingress *networkingv1.Ingress, data []byte) (*networkingv1.Ingress, error)
+}
 
-		metadata.RemoveFinalizer(ingress, cascadeCleanupFinalizer)
-
-		c.hostsWatcher.StopWatching(ingressKey(ingress), "")
-
-		return nil
-	}
-	metadata.AddFinalizer(ingress, cascadeCleanupFinalizer)
-
-	if ingress.Annotations == nil || ingress.Annotations[cluster.ANNOTATION_HCG_HOST] == "" {
-		// Let's assign it a global hostname if any
-		generatedHost := fmt.Sprintf("%s.%s", xid.New(), c.domain)
-		patch := fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`, cluster.ANNOTATION_HCG_HOST, generatedHost)
-		i, err := c.patchIngress(ctx, ingress, []byte(patch))
-		if err != nil {
-			return err
-		}
-		ingress = i
-	}
-
-	// if custom hosts are not enabled all the hosts in the ingress
-	// will be replaced to the generated host
-	if !c.customHostsEnabled {
-		err := c.replaceCustomHosts(ctx, ingress)
-		if err != nil {
-			return err
-		}
-	}
-
-	// setup certificates
-	if err := c.ensureCertificate(ctx, ingress); err != nil {
-		return err
-	}
-
-	// update DNS
-	if err := c.ensureDNS(ctx, ingress); err != nil {
-		return err
-	}
-
-	return nil
+type dnsReconciler struct {
+	deleteDNS        func(ctx context.Context, ingress *networkingv1.Ingress) error
+	getDNS           func(ctx context.Context, ingress *networkingv1.Ingress) (*v1.DNSRecord, error)
+	createDNS        func(ctx context.Context, dns *v1.DNSRecord) (*v1.DNSRecord, error)
+	patchDNS         func(ctx context.Context, dns *v1.DNSRecord, data []byte) (*v1.DNSRecord, error)
+	watchHost        func(ctx context.Context, key interface{}, host string) bool
+	forgetHost       func(key interface{}, host string)
+	listHostWatchers func(key interface{}) []net.RecordWatcher
+	DNSLookup        func(ctx context.Context, host string) ([]net.HostAddress, error)
 }
 
 // ensureCertificate creates a certificate request for the root ingress into the control cluster
-func (c *Controller) ensureCertificate(ctx context.Context, ingress *networkingv1.Ingress) error {
-	if c.certProvider == nil {
-		c.Logger.Info("TLS support is not enabled, skipping certificate request")
-		return nil
-	}
+func (r *certificateReconciler) reconcile(ctx context.Context, ingress *networkingv1.Ingress) (reconcileStatus, error) {
 
 	controlClusterContext, err := cluster.NewControlObjectMapper(ingress)
 	if err != nil {
-		return err
+		return reconcileStatusStop, err
 	}
 	if ingress.DeletionTimestamp != nil && !ingress.DeletionTimestamp.IsZero() {
-		if err := c.certProvider.Delete(ctx, controlClusterContext); err != nil {
-			return err
+		if err := r.deleteCertificate(ctx, controlClusterContext); err != nil {
+			return reconcileStatusStop, err
 		}
-		return nil
+		return reconcileStatusContinue, nil
 	}
-	err = c.certProvider.Create(ctx, controlClusterContext)
+	err = r.createCertificate(ctx, controlClusterContext)
 	if err != nil && !errors.IsAlreadyExists(err) {
-		return err
+		return reconcileStatusStop, err
 	}
-
-	c.Logger.Info("Patching Ingress with TLS Secret", "ingress", ingress)
 	patch := fmt.Sprintf(`{"spec":{"tls":[{"hosts":[%q],"secretName":%q}]}}`, controlClusterContext.Host(), controlClusterContext.Name())
-	if _, err := c.patchIngress(ctx, ingress, []byte(patch)); err != nil {
-		c.Logger.Error(err, "Failed to patch Ingress", "ingress", ingress)
-		return err
+	if _, err := r.patchIngress(ctx, ingress, []byte(patch)); err != nil {
+		return reconcileStatusStop, err
 	}
 
-	return nil
+	return reconcileStatusContinue, nil
 }
 
-func (c *Controller) ensureDNS(ctx context.Context, ingress *networkingv1.Ingress) error {
+func (r *dnsReconciler) reconcile(ctx context.Context, ingress *networkingv1.Ingress) (reconcileStatus, error) {
 	if ingress.DeletionTimestamp != nil && !ingress.DeletionTimestamp.IsZero() {
 		// delete DNSRecord
-		err := c.dnsRecordClient.Cluster(logicalcluster.From(ingress)).KuadrantV1().DNSRecords(ingress.Namespace).Delete(ctx, ingress.Name, metav1.DeleteOptions{})
-		if err != nil && !errors.IsNotFound(err) {
-			return err
+		if err := r.deleteDNS(ctx, ingress); err != nil && !errors.IsNotFound(err) {
+			return reconcileStatusStop, err
 		}
-		return nil
+		return reconcileStatusContinue, nil
 	}
 
 	if len(ingress.Status.LoadBalancer.Ingress) > 0 {
@@ -133,31 +95,32 @@ func (c *Controller) ensureDNS(ctx context.Context, ingress *networkingv1.Ingres
 		// Start watching for address changes in the LBs hostnames
 		for _, lbs := range ingress.Status.LoadBalancer.Ingress {
 			if lbs.Hostname != "" {
-				c.hostsWatcher.StartWatching(ctx, key, lbs.Hostname)
+				r.watchHost(ctx, key, lbs.Hostname)
 				activeHosts = append(activeHosts, lbs.Hostname)
 			}
 		}
 
-		hostRecordWatchers := c.hostsWatcher.ListHostRecordWatchers(key)
+		hostRecordWatchers := r.listHostWatchers(key)
 		for _, watcher := range hostRecordWatchers {
 			if !slice.ContainsString(activeHosts, watcher.Host) {
-				c.hostsWatcher.StopWatching(key, watcher.Host)
+				r.forgetHost(key, watcher.Host)
 			}
 		}
 
 		// Attempt to retrieve the existing DNSRecord for this Ingress
-		existing, err := c.dnsRecordClient.Cluster(logicalcluster.From(ingress)).KuadrantV1().DNSRecords(ingress.Namespace).Get(ctx, ingress.Name, metav1.GetOptions{})
+		existing, err := r.getDNS(ctx, ingress)
 		// If it doesn't exist, create it
+
 		if err != nil && errors.IsNotFound(err) {
 			// Create the DNSRecord object
 			record := &v1.DNSRecord{}
-			if err := c.setDnsRecordFromIngress(ctx, ingress, record); err != nil {
-				return err
+			if err := r.setDnsRecordFromIngress(ctx, ingress, record); err != nil {
+				return reconcileStatusStop, err
 			}
 			// Create the resource in the cluster
-			existing, err = c.dnsRecordClient.Cluster(logicalcluster.From(record)).KuadrantV1().DNSRecords(record.Namespace).Create(ctx, record, metav1.CreateOptions{})
+			existing, err = r.createDNS(ctx, record)
 			if err != nil {
-				return err
+				return reconcileStatusStop, err
 			}
 
 			// metric to observe the ingress admission time
@@ -166,27 +129,26 @@ func (c *Controller) ensureDNS(ctx context.Context, ingress *networkingv1.Ingres
 
 		} else if err == nil {
 			// If it does exist, update it
-			if err := c.setDnsRecordFromIngress(ctx, ingress, existing); err != nil {
-				return err
+			if err := r.setDnsRecordFromIngress(ctx, ingress, existing); err != nil {
+				return reconcileStatusStop, err
 			}
 
 			data, err := json.Marshal(existing)
 			if err != nil {
-				return err
+				return reconcileStatusStop, err
 			}
-			_, err = c.dnsRecordClient.Cluster(logicalcluster.From(existing)).KuadrantV1().DNSRecords(existing.Namespace).Patch(ctx, existing.Name, types.ApplyPatchType, data, metav1.PatchOptions{FieldManager: manager, Force: pointer.Bool(true)})
-			if err != nil {
-				return err
+			if _, err = r.patchDNS(ctx, existing, data); err != nil {
+				return reconcileStatusStop, err
 			}
 		} else {
-			return err
+			return reconcileStatusStop, err
 		}
 	}
 
-	return nil
+	return reconcileStatusContinue, nil
 }
 
-func (c *Controller) setDnsRecordFromIngress(ctx context.Context, ingress *networkingv1.Ingress, dnsRecord *v1.DNSRecord) error {
+func (r *dnsReconciler) setDnsRecordFromIngress(ctx context.Context, ingress *networkingv1.Ingress, dnsRecord *v1.DNSRecord) error {
 	dnsRecord.TypeMeta = metav1.TypeMeta{
 		APIVersion: v1.SchemeGroupVersion.String(),
 		Kind:       "DNSRecord",
@@ -213,11 +175,11 @@ func (c *Controller) setDnsRecordFromIngress(ctx context.Context, ingress *netwo
 		},
 	})
 
-	return c.setEndpointsFromIngress(ctx, ingress, dnsRecord)
+	return r.setEndpointsFromIngress(ctx, ingress, dnsRecord)
 }
 
-func (c *Controller) setEndpointsFromIngress(ctx context.Context, ingress *networkingv1.Ingress, dnsRecord *v1.DNSRecord) error {
-	targets, err := c.targetsFromIngressStatus(ctx, ingress.Status)
+func (r *dnsReconciler) setEndpointsFromIngress(ctx context.Context, ingress *networkingv1.Ingress, dnsRecord *v1.DNSRecord) error {
+	targets, err := r.targetsFromIngressStatus(ctx, ingress.Status)
 	if err != nil {
 		return err
 	}
@@ -266,7 +228,7 @@ func (c *Controller) setEndpointsFromIngress(ctx context.Context, ingress *netwo
 }
 
 // targetsFromIngressStatus returns a map of all the IPs associated with a single ingress(cluster)
-func (c *Controller) targetsFromIngressStatus(ctx context.Context, status networkingv1.IngressStatus) (map[string][]string, error) {
+func (r *dnsReconciler) targetsFromIngressStatus(ctx context.Context, status networkingv1.IngressStatus) (map[string][]string, error) {
 	var targets = make(map[string][]string, len(status.LoadBalancer.Ingress))
 
 	for _, lb := range status.LoadBalancer.Ingress {
@@ -274,7 +236,7 @@ func (c *Controller) targetsFromIngressStatus(ctx context.Context, status networ
 			targets[lb.IP] = []string{lb.IP}
 		}
 		if lb.Hostname != "" {
-			ips, err := c.hostResolver.LookupIPAddr(ctx, lb.Hostname)
+			ips, err := r.DNSLookup(ctx, lb.Hostname)
 			if err != nil {
 				return nil, err
 			}
@@ -287,25 +249,41 @@ func (c *Controller) targetsFromIngressStatus(ctx context.Context, status networ
 	return targets, nil
 }
 
-//nolint
-// getServices will parse the ingress object and return a list of the services.
-func (c *Controller) getServices(ctx context.Context, ingress *networkingv1.Ingress) ([]*corev1.Service, error) {
-	var services []*corev1.Service
-	for _, rule := range ingress.Spec.Rules {
-		for _, path := range rule.HTTP.Paths {
-			service, err := c.kubeClient.Cluster(logicalcluster.From(ingress)).CoreV1().Services(ingress.Namespace).Get(ctx, path.Backend.Service.Name, metav1.GetOptions{})
-			if err == nil {
-				c.tracker.add(ingress, service)
-				services = append(services, service)
-			} else if !errors.IsNotFound(err) {
-				return nil, err
-			} else {
-				// ignore service not found errors
-				continue
-			}
+func (c *Controller) reconcile(ctx context.Context, ingress *networkingv1.Ingress) error {
+	reconcilers := []reconciler{
+		&hostReconciler{
+			updateIngress: c.updateIngress,
+			managedDomain: c.domain,
+		},
+		&certificateReconciler{
+			createCertificate: c.certProvider.Create,
+			deleteCertificate: c.certProvider.Delete,
+			patchIngress:      c.patchIngress,
+		},
+		&dnsReconciler{
+			deleteDNS:        c.deleteDNS,
+			DNSLookup:        c.hostResolver.LookupIPAddr,
+			getDNS:           c.getDNS,
+			createDNS:        c.createDNS,
+			patchDNS:         c.patchDNS,
+			watchHost:        c.hostsWatcher.StartWatching,
+			forgetHost:       c.hostsWatcher.StopWatching,
+			listHostWatchers: c.hostsWatcher.ListHostRecordWatchers,
+		},
+	}
+	var errs []error
+
+	for _, r := range reconcilers {
+		status, err := r.reconcile(ctx, ingress)
+		if err != nil {
+			errs = append(errs, err)
+		}
+		if status == reconcileStatusStop {
+			break
 		}
 	}
-	return services, nil
+
+	return utilserrors.NewAggregate(errs)
 }
 
 func (c *Controller) patchIngress(ctx context.Context, ingress *networkingv1.Ingress, data []byte) (*networkingv1.Ingress, error) {
@@ -313,33 +291,33 @@ func (c *Controller) patchIngress(ctx context.Context, ingress *networkingv1.Ing
 		Patch(ctx, ingress.Name, types.MergePatchType, data, metav1.PatchOptions{FieldManager: manager})
 }
 
+func (c *Controller) patchDNS(ctx context.Context, dns *v1.DNSRecord, data []byte) (*v1.DNSRecord, error) {
+	return c.dnsRecordClient.Cluster(logicalcluster.From(dns)).KuadrantV1().DNSRecords(dns.Namespace).Patch(ctx, dns.Name, types.ApplyPatchType, data, metav1.PatchOptions{FieldManager: manager, Force: pointer.Bool(true)})
+}
+
+func (c *Controller) deleteDNS(ctx context.Context, ingress *networkingv1.Ingress) error {
+	return c.dnsRecordClient.Cluster(logicalcluster.From(ingress)).KuadrantV1().DNSRecords(ingress.Namespace).Delete(ctx, ingress.Name, metav1.DeleteOptions{})
+}
+
+func (c *Controller) getDNS(ctx context.Context, ingress *networkingv1.Ingress) (*v1.DNSRecord, error) {
+	return c.dnsRecordClient.Cluster(logicalcluster.From(ingress)).KuadrantV1().DNSRecords(ingress.Namespace).Get(ctx, ingress.Name, metav1.GetOptions{})
+}
+
+func (c *Controller) createDNS(ctx context.Context, dnsRecord *v1.DNSRecord) (*v1.DNSRecord, error) {
+	return c.dnsRecordClient.Cluster(logicalcluster.From(dnsRecord)).KuadrantV1().DNSRecords(dnsRecord.Namespace).Create(ctx, dnsRecord, metav1.CreateOptions{})
+}
+
 func ingressKey(ingress *networkingv1.Ingress) interface{} {
 	key, _ := cache.MetaNamespaceKeyFunc(ingress)
 	return cache.ExplicitKey(key)
 }
 
-func (c *Controller) replaceCustomHosts(ctx context.Context, ingress *networkingv1.Ingress) error {
-	generatedHost := ingress.Annotations[cluster.ANNOTATION_HCG_HOST]
-	var hosts []string
-	for i, rule := range ingress.Spec.Rules {
-		if rule.Host != generatedHost {
-			ingress.Spec.Rules[i].Host = generatedHost
-			hosts = append(hosts, rule.Host)
-		}
+func (c *Controller) updateIngress(ctx context.Context, ingress *networkingv1.Ingress) (*networkingv1.Ingress, error) {
+	i, err := c.kubeClient.Cluster(logicalcluster.From(ingress)).NetworkingV1().Ingresses(ingress.Namespace).Update(ctx, ingress, metav1.UpdateOptions{})
+	if err != nil {
+		return nil, err
 	}
-
-	// clean up replaced hosts from the tls list
-	removeHostsFromTLS(hosts, ingress)
-
-	if len(hosts) > 0 {
-		ingress.Annotations[cluster.ANNOTATION_HCG_CUSTOM_HOST_REPLACED] = fmt.Sprintf(" replaced custom hosts %v to the glbc host due to custom host policy not being allowed",
-			hosts)
-		if _, err := c.kubeClient.Cluster(logicalcluster.From(ingress)).NetworkingV1().Ingresses(ingress.Namespace).Update(ctx, ingress, metav1.UpdateOptions{}); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return i, nil
 }
 
 func removeHostsFromTLS(hostsToRemove []string, ingress *networkingv1.Ingress) {

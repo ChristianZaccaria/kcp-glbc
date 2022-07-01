@@ -12,7 +12,7 @@ import (
 // whenever a change is detected
 type HostsWatcher struct {
 	Resolver      HostResolver
-	Records       []recordWatcher
+	Records       []RecordWatcher
 	OnChange      func(interface{})
 	WatchInterval func(ttl time.Duration) time.Duration
 	logger        logr.Logger
@@ -21,14 +21,14 @@ type HostsWatcher struct {
 func NewHostsWatcher(l *logr.Logger, resolver HostResolver, watchInterval func(ttl time.Duration) time.Duration) *HostsWatcher {
 	return &HostsWatcher{
 		Resolver:      resolver,
-		Records:       []recordWatcher{},
+		Records:       []RecordWatcher{},
 		WatchInterval: watchInterval,
 		logger:        l.WithName("host-watcher"),
 	}
 }
 
-func (w *HostsWatcher) ListHostRecordWatchers(obj interface{}) []recordWatcher {
-	var recordWatchers []recordWatcher
+func (w *HostsWatcher) ListHostRecordWatchers(obj interface{}) []RecordWatcher {
+	var recordWatchers []RecordWatcher
 	for _, record := range w.Records {
 		if obj == record.key {
 			recordWatchers = append(recordWatchers, record)
@@ -47,7 +47,7 @@ func (w *HostsWatcher) StartWatching(ctx context.Context, obj interface{}, host 
 
 	c, cancel := context.WithCancel(ctx)
 
-	recordWatcher := recordWatcher{
+	recordWatcher := RecordWatcher{
 		cancel:        cancel,
 		logger:        w.logger.WithValues("key", obj, "host", host),
 		resolver:      w.Resolver,
@@ -67,7 +67,7 @@ func (w *HostsWatcher) StartWatching(ctx context.Context, obj interface{}, host 
 
 // StopWatching stops tracking changes in the addresses associated to obj
 func (w *HostsWatcher) StopWatching(obj interface{}, host string) {
-	var records []recordWatcher
+	var records []RecordWatcher
 	for _, recordWatcher := range w.Records {
 		if (host == "" || host == recordWatcher.Host) && recordWatcher.key == obj {
 			recordWatcher.stop()
@@ -78,7 +78,7 @@ func (w *HostsWatcher) StopWatching(obj interface{}, host string) {
 	w.Records = records
 }
 
-type recordWatcher struct {
+type RecordWatcher struct {
 	logger        logr.Logger
 	resolver      HostResolver
 	cancel        context.CancelFunc
@@ -93,7 +93,7 @@ func DefaultInterval(ttl time.Duration) time.Duration {
 	return ttl / 2
 }
 
-func (w *recordWatcher) watch(ctx context.Context) {
+func (w *RecordWatcher) watch(ctx context.Context) {
 	go func() {
 		for {
 			select {
@@ -121,7 +121,7 @@ func (w *recordWatcher) watch(ctx context.Context) {
 	}()
 }
 
-func (w *recordWatcher) updateRecords(newRecords []HostAddress) bool {
+func (w *RecordWatcher) updateRecords(newRecords []HostAddress) bool {
 	if len(w.records) != len(newRecords) {
 		w.records = newRecords
 		return true
@@ -148,7 +148,7 @@ func (w *recordWatcher) updateRecords(newRecords []HostAddress) bool {
 	return updatedIPs
 }
 
-func (w *recordWatcher) stop() {
+func (w *RecordWatcher) stop() {
 	w.logger.V(3).Info("Stopping host watcher")
 	w.cancel()
 }
