@@ -1,1 +1,3 @@
-let rules = [ ./GLBCTargetDown.dhall ] in rules
+let rules = [ ./GLBCTargetDown.dhall, ./HighDNSProviderErrorRate.dhall ]
+
+in  rules

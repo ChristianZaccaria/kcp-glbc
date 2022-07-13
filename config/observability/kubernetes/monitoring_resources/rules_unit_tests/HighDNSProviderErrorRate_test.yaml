@@ -1,0 +1,25 @@
+rule_files:
+  - ../rules-glbc.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: glbc_aws_route53_request_errors_total{pod="glbc"}
+        values: "0+0x5 2+2x15"
+      - series: glbc_aws_route53_request_total{pod="glbc"}
+        values: "100+100x20"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: HighDNSProviderErrorRate
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: HighDNSProviderErrorRate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: 'High DNS Provider Error Rate'
+              description: 'Excessive errors - more than 1% of requests are errors'
+              runbook_url: 'https://github.com/Kuadrant/kcp-glbc/blob/main/docs/observability/runbooks/HighDNSProviderErrorRate.adoc'

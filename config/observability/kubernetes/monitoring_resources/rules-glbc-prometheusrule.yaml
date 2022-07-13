@@ -35,3 +35,12 @@ spec:
           for: "5m"
           labels:
             severity: critical
+        - alert: HighDNSProviderErrorRate
+          annotations:
+            description: "Excessive errors - The error rate is {{ $value }}, which is greater than the threshold which is 1%"
+            runbook_url: https://github.com/Kuadrant/kcp-glbc/blob/main/docs/observability/runbooks/HighDNSProviderErrorRate.adoc
+            summary: High DNS Provider Error Rate
+          expr: "sum(rate(glbc_aws_route53_request_errors_total{}[5m])) by(pod) / sum(rate(glbc_aws_route53_request_total{}[5m])) by(pod) > 0.01"
+          for: "60m"
+          labels:
+            severity: warning
