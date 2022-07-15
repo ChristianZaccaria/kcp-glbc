@@ -1,0 +1,37 @@
+// begin header
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+:numbered:
+:toc: macro
+:toc-title: pass:[<b>Table of Contents</b>]
+// end header
+= HighDNSLatencyAlert
+
+toc::[]
+
+== Description
+
+The source of the alert is the `someAlertMetric` metric. It fires when the condition foo is true.
+
+Add other helpful information about the alert here if necessary.
+
+== Prerequisites
+
+* Add any information that is needed or access to any system that is needed.
+
+== Execute/Resolution
+
+. Steps to troubleshoot & resolve
+
+== Validate
+
+What steps are required to verify that the procedure has been followed correctly and the required changes have been implemented correctly, with the desired outcome.
+
+. Check the alert is no longer firing.
+// Add any extra steps
+. Add more as necessary

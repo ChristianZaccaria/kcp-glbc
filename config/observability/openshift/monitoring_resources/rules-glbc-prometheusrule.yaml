@@ -35,6 +35,15 @@ spec:
           for: "5m"
           labels:
             severity: critical
+        - alert: HighDNSLatencyAlert
+          annotations:
+            description: Description
+            runbook_url: https://github.com/Kuadrant/kcp-glbc/blob/main/docs/observability/runbooks/HighDNSLatencyAlert.adoc
+            summary: High DNS Latency Rate Alert
+          expr: "vector(1)"
+          for: "60m"
+          labels:
+            severity: warning
         - alert: HighDNSProviderErrorRate
           annotations:
             description: "Excessive errors - The error rate is {{ $value }}, which is greater than the threshold which is 1%"
