@@ -15,14 +15,17 @@ let PrometheusOperator =
 
 in  PrometheusOperator.Rule::{
     , alert = Some "HighDNSLatencyAlert"
-    , expr = K8s.IntOrString.String "vector(1)"
+    , expr =
+        K8s.IntOrString.String
+          "sum(rate(glbc_aws_route53_request_duration_seconds_bucket{le=\"0.5\"}[5m])) by(pod) / sum(rate(glbc_aws_route53_request_duration_seconds_count[5m])) by(pod) < 0.95"
     , for = Some (Duration.show { amount = 60, unit = TimeUnit.Type.Minutes })
     , labels = Some
         (toMap { severity = AlertSeverity.show AlertSeverity.Type.Warning })
     , annotations = Some
         ( toMap
             { summary = "High DNS Latency Rate Alert"
-            , description = "Description"
+            , description =
+                "Less than 95% (0.95) of the requests are being served within 5 seconds. The current percentile is {{ \$value }}"
             , runbook_url =
                 "https://github.com/Kuadrant/kcp-glbc/blob/main/docs/observability/runbooks/HighDNSLatencyAlert.adoc"
             }

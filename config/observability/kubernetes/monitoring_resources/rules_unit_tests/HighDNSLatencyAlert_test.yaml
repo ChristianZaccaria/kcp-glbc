@@ -6,7 +6,9 @@ evaluation_interval: 1m
 tests:
   - interval: 1m
     input_series:
-      - series: up{}
+      - series: glbc_aws_route53_request_duration_seconds_bucket{pod=glbc}
+        values: "1+0x5 0+0x15"
+      - series: glbc_aws_route53_request_duration_seconds_count{pod=glbc}
         values: "1+0x5 0+0x15"
     alert_rule_test:
       - eval_time: 5m

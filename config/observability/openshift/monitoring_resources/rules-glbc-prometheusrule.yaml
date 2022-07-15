@@ -37,10 +37,10 @@ spec:
             severity: critical
         - alert: HighDNSLatencyAlert
           annotations:
-            description: Description
+            description: "Less than 95% (0.95) of the requests are being served within 5 seconds. The current percentile is {{ $value }}"
             runbook_url: https://github.com/Kuadrant/kcp-glbc/blob/main/docs/observability/runbooks/HighDNSLatencyAlert.adoc
             summary: High DNS Latency Rate Alert
-          expr: "vector(1)"
+          expr: "sum(rate(glbc_aws_route53_request_duration_seconds_bucket{le=\"0.5\"}[5m])) by(pod) / sum(rate(glbc_aws_route53_request_duration_seconds_count[5m])) by(pod) < 0.95"
           for: "60m"
           labels:
             severity: warning
