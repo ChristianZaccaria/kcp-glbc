@@ -6,19 +6,19 @@ evaluation_interval: 1m
 tests:
   - interval: 1m
     input_series:
-      - series: glbc_aws_route53_request_duration_seconds_bucket{pod=glbc}
-        values: "1+0x5 0+0x15"
-      - series: glbc_aws_route53_request_duration_seconds_count{pod=glbc}
-        values: "1+0x5 0+0x15"
+      - series: glbc_aws_route53_request_duration_seconds_bucket{pod="glbc"}
+        values: "0+0x60 2+2x65"
+      - series: glbc_aws_route53_request_duration_seconds_count{pod="glbc"}
+        values: "2+4x125"
     alert_rule_test:
-      - eval_time: 5m
+      - eval_time: 60m
         alertname: HighDNSLatencyAlert
         exp_alerts: []
-      - eval_time: 20m
+      - eval_time: 125m
         alertname: HighDNSLatencyAlert
         exp_alerts:
           - exp_labels:
-              severity: critical
+              severity: warning
             exp_annotations:
               summary: 'Summary of the alert'
               description: 'More detailed description of the alert and cause of firing'
