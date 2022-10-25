@@ -35,7 +35,7 @@ kubectl logs deployment/kcp-glbc-controller-manager
 kubectl get events
 ----
 . Based on logs or events you may need to kill the pod to get it into a good state again, or troubleshoot any errors (GLBC or K8S).
-. If GBLC is running OK, check for metrics configuration issues.
+. If GLBC is running OK, check for metrics configuration issues.
 +
 [source,sh]
 ----

@@ -2,9 +2,9 @@
 
 `kcp` is a prototype of a multi-tenant Kubernetes control plane for workloads on many clusters. `kcp` can be used to manage Kubernetes-like applications across one or more clusters and integrate them with cloud services. 
 
-It provides a generic CRD apiserver that is divided into multiple logical clusters (in which each of the logical clusters are fully isolated) that enable multitenancy of cluster-scoped resources such as CRDs and Namespaces. 
+It provides a generic CRD apiserver that is divided into multiple logical clusters (in which each of the logical clusters are fully isolated) that enable multi-tenancy of cluster-scoped resources such as CRDs and Namespaces. 
 
-See the [`kcp` docs](https://github.com/Kuadrant/kcp) for further explanation and to learn more about the terminology, refer to the [docs](https://github.com/kcp-dev/kcp/blob/main/docs/terminology.md).
+See the [`kcp` docs](https://github.com/Kuadrant/kcp) for further explanation and to learn more about the terminology, refer to the [docs](https://github.com/kcp-dev/kcp/blob/e798d372575e694db66bff61bd46700b413e1b9e/docs/content/en/main/concepts/concepts.md).
 
 
 # What is GLBC?

@@ -18,7 +18,7 @@ To get started with the GLBC, we recommend you follow our [Getting Started tutor
 
 ## Development
 
-###Interacting directly with WorkloadClusters
+### Interacting directly with WorkloadClusters
 
 Prefix `kubectl` with the appropriate kubeconfig file from the tmp directory.
 For example:

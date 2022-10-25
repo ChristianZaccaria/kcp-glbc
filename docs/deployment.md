@@ -5,13 +5,13 @@ This requires you to have access to a KCP instance to deploy GLBC to, if you wan
 
 **Prerequisite**
 
-* KCP version 0.7
+* KCP version 0.9
 
 **Useful Links**
 
 * [KCP](https://github.com/kcp-dev/kcp)
 * [KCP Docs](https://github.com/kcp-dev/kcp/blob/main/docs)
-* [KCP Locations and Scheduling](https://github.com/kcp-dev/kcp/blob/main/docs/locations-and-scheduling.md#locations-and-scheduling)
+* [KCP Locations and Scheduling](https://github.com/kcp-dev/kcp/blob/main/docs/content/en/main/concepts/locations-and-scheduling.md)
 
 ## GLBC
 
@@ -24,7 +24,7 @@ N.B. You must be targeting a KCP instance in order to install GLBC.
 
 ## GLBC Sync Target
 
-The deployment script will create a `glbc` sync target in the target workspace, however, for GLBC and it's dependencies to deploy the [`KCP syncer`](https://github.com/kcp-dev/kcp/blob/main/docs/syncer.md) resources must be applied to a physical cluster.
+The deployment script will create a `glbc` sync target in the target workspace, however, for GLBC and it's dependencies to deploy the [`KCP syncer`](https://github.com/kcp-dev/kcp/blob/main/docs/content/en/main/concepts/syncer.md) resources must be applied to a physical cluster.
 The exact command will be output as part of the deploy script, but will look something like:
 
 ```
